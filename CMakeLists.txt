@@ -126,24 +126,88 @@ if(USE_CUDA)
   # so CMAKE_CUDA_ARCHITECTURES is not automatically applied.
   set_property(TARGET decord PROPERTY CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES})
 
-  # 5. Link against the modern CUDAToolkit imported targets
-  # This is much more reliable than using old custom variables.
-  target_link_libraries(decord PRIVATE
-          CUDAToolkit::cudart
-          CUDAToolkit::nvrtc
-          CUDAToolkit::cublas
-          CUDAToolkit::nvml
-  )
+  # 5. Link against CUDA libraries
+  # Add CUDA include directories
+  target_include_directories(decord PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+
+  # Try modern CUDAToolkit imported targets first, fallback to manual library search
+  if(TARGET CUDA::cudart)
+    message(STATUS "Using CUDA:: imported targets")
+    target_link_libraries(decord PRIVATE CUDA::cudart)
+    if(TARGET CUDA::nvrtc)
+      target_link_libraries(decord PRIVATE CUDA::nvrtc)
+    endif()
+    if(TARGET CUDA::cublas)
+      target_link_libraries(decord PRIVATE CUDA::cublas)
+    endif()
+    if(TARGET CUDA::nvml)
+      target_link_libraries(decord PRIVATE CUDA::nvml)
+    endif()
+  elseif(TARGET CUDAToolkit::cudart)
+    message(STATUS "Using CUDAToolkit:: imported targets")
+    target_link_libraries(decord PRIVATE CUDAToolkit::cudart)
+    if(TARGET CUDAToolkit::nvrtc)
+      target_link_libraries(decord PRIVATE CUDAToolkit::nvrtc)
+    endif()
+    if(TARGET CUDAToolkit::cublas)
+      target_link_libraries(decord PRIVATE CUDAToolkit::cublas)
+    endif()
+    if(TARGET CUDAToolkit::nvml)
+      target_link_libraries(decord PRIVATE CUDAToolkit::nvml)
+    endif()
+  else()
+    # Fallback: manually find and link CUDA libraries
+    message(STATUS "Falling back to manual CUDA library search")
+
+    # Define search paths
+    set(_cuda_lib_search_paths
+        ${CUDAToolkit_LIBRARY_DIR}
+        ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib64
+        ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib
+        /usr/local/cuda/lib64
+        /usr/local/cuda/lib
+        /usr/lib/x86_64-linux-gnu
+        /usr/lib64
+    )
+
+    find_library(CUDA_CUDART_LIB cudart HINTS ${_cuda_lib_search_paths})
+    find_library(CUDA_NVRTC_LIB nvrtc HINTS ${_cuda_lib_search_paths})
+    find_library(CUDA_CUBLAS_LIB cublas HINTS ${_cuda_lib_search_paths})
+    find_library(CUDA_NVML_LIB nvidia-ml HINTS ${_cuda_lib_search_paths})
+
+    if(CUDA_CUDART_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_CUDART_LIB})
+      message(STATUS "Found cudart: ${CUDA_CUDART_LIB}")
+    else()
+      message(FATAL_ERROR "Could not find cudart library")
+    endif()
+
+    if(CUDA_NVRTC_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_NVRTC_LIB})
+      message(STATUS "Found nvrtc: ${CUDA_NVRTC_LIB}")
+    endif()
+
+    if(CUDA_CUBLAS_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_CUBLAS_LIB})
+      message(STATUS "Found cublas: ${CUDA_CUBLAS_LIB}")
+    endif()
+
+    if(CUDA_NVML_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_NVML_LIB})
+      message(STATUS "Found nvml: ${CUDA_NVML_LIB}")
+    endif()
+  endif()
 
   # Find nvcuvid library (required for hardware video decoding)
   find_library(CUDA_NVCUVID_LIBRARY nvcuvid
           HINTS
           ${CUDAToolkit_LIBRARY_DIR}
+          ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib64
+          ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib
+          /usr/local/cuda/lib64
+          /usr/local/cuda/lib
           /usr/lib/x86_64-linux-gnu
           /usr/lib64
-          ${CUDA_TOOLKIT_ROOT_DIR}/lib64
-          ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-          ${CUDA_TOOLKIT_ROOT_DIR}/lib/Win32
   )
   if(CUDA_NVCUVID_LIBRARY)
     target_link_libraries(decord PRIVATE ${CUDA_NVCUVID_LIBRARY})

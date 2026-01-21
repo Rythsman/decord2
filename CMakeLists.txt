@@ -87,6 +87,32 @@ endif()
 # ---------------------------------------------------------------------------
 if(USE_CUDA)
   message(STATUS "USE_CUDA is ON. Configuring CUDA support.")
+
+  # Set CUDA architectures before enabling CUDA language.
+  # If CUDA_ARCH is not specified, use a sensible default based on the CUDA version.
+  # Users can override this by setting -DCUDA_ARCH="75;80;86" or similar.
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    if(DEFINED CUDA_ARCH AND NOT CUDA_ARCH STREQUAL "")
+      # Parse user-provided CUDA_ARCH (comma or semicolon separated)
+      string(REPLACE "," ";" _cuda_arch_list "${CUDA_ARCH}")
+      set(CMAKE_CUDA_ARCHITECTURES ${_cuda_arch_list})
+      message(STATUS "Using user-specified CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+    else()
+      # Use "native" to auto-detect the GPU architecture on the build machine.
+      # Fallback to common architectures if native detection is not available.
+      # For CMake 3.24+, "native" is supported. For older versions, use a default list.
+      if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+        set(CMAKE_CUDA_ARCHITECTURES "native")
+        message(STATUS "Using native CUDA architecture detection")
+      else()
+        # Default architectures covering most modern GPUs:
+        # 52 = Maxwell, 60/61 = Pascal, 70 = Volta, 75 = Turing, 80/86 = Ampere, 89 = Ada, 90 = Hopper
+        set(CMAKE_CUDA_ARCHITECTURES "52;60;61;70;75;80;86")
+        message(STATUS "Using default CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+      endif()
+    endif()
+  endif()
+
   # 1. Enable the CUDA language. This finds the compiler automatically.
   enable_language(CUDA)
   find_package(CUDAToolkit REQUIRED)

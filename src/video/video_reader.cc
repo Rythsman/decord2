@@ -707,15 +707,23 @@ void VideoReader::SkipFramesImpl(int64_t num)
         ret = decoder_->Pop(&frame);
         if (!ret) {
             pop_retries++;
+            // Check if we've reached EOF - no point retrying if there's no more data
+            if (eof_) {
+                LOG(WARNING) << "[" << filename_ << "] EOF reached while skipping frames at frame " << curr_frame_
+                             << ". Attempted to skip " << initial_num << " frames, skipped " << (initial_num - num) << ".";
+                break;
+            }
             if (pop_retries > MAX_POP_RETRIES_PER_FRAME) {
-                LOG(INFO) << "[" << filename_ << "] Failed to skip frames effectively at frame " << curr_frame_
-                           << ". Decoder did not respond after " << MAX_POP_RETRIES_PER_FRAME
-                           << " attempts. Video might be corrupted or seeking failed. Aborting skip operation."
-                           << " Attempted to skip " << initial_num << " frames, skipped " << (initial_num - num) << ".";
+                LOG(WARNING) << "[" << filename_ << "] Failed to skip frames effectively at frame " << curr_frame_
+                             << ". Decoder did not respond after " << MAX_POP_RETRIES_PER_FRAME
+                             << " attempts. Video might be corrupted or seeking failed. Aborting skip operation."
+                             << " Attempted to skip " << initial_num << " frames, skipped " << (initial_num - num) << ".";
                 break;
             }
             continue;
         }
+        // Reset retry counter on successful frame retrieval
+        pop_retries = 0;
         ++curr_frame_;
         // LOG(INFO) << "skip: " << num;
         --num;

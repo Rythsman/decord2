@@ -707,15 +707,34 @@ void VideoReader::SkipFramesImpl(int64_t num)
         ret = decoder_->Pop(&frame);
         if (!ret) {
             pop_retries++;
+            // Check if we've reached EOF - no point retrying if there's no more data
+            if (eof_) {
+                // Near EOF, some frames may not be retrievable due to decoder buffering.
+                // This is expected behavior, not an error.
+                DLOG(INFO) << "[" << filename_ << "] EOF reached while skipping frames at frame " << curr_frame_
+                           << ". Attempted to skip " << initial_num << " frames, skipped " << (initial_num - num) << ".";
+                break;
+            }
             if (pop_retries > MAX_POP_RETRIES_PER_FRAME) {
-                LOG(INFO) << "[" << filename_ << "] Failed to skip frames effectively at frame " << curr_frame_
-                           << ". Decoder did not respond after " << MAX_POP_RETRIES_PER_FRAME
-                           << " attempts. Video might be corrupted or seeking failed. Aborting skip operation."
-                           << " Attempted to skip " << initial_num << " frames, skipped " << (initial_num - num) << ".";
+                // Only log as warning if we failed to skip a significant portion of frames.
+                // Near EOF, it's normal to miss a few frames due to decoder buffering.
+                int64_t skipped = initial_num - num;
+                float skip_ratio = static_cast<float>(skipped) / initial_num;
+                if (skip_ratio < 0.8f) {
+                    LOG(WARNING) << "[" << filename_ << "] Failed to skip frames effectively at frame " << curr_frame_
+                                 << ". Decoder did not respond after " << MAX_POP_RETRIES_PER_FRAME
+                                 << " attempts. Video might be corrupted or seeking failed."
+                                 << " Attempted to skip " << initial_num << " frames, skipped " << skipped << ".";
+                } else {
+                    DLOG(INFO) << "[" << filename_ << "] Skip operation completed with minor gaps at frame " << curr_frame_
+                               << ". Attempted to skip " << initial_num << " frames, skipped " << skipped << ".";
+                }
                 break;
             }
             continue;
         }
+        // Reset retry counter on successful frame retrieval
+        pop_retries = 0;
         ++curr_frame_;
         // LOG(INFO) << "skip: " << num;
         --num;

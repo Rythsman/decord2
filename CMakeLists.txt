@@ -87,6 +87,27 @@ endif()
 # ---------------------------------------------------------------------------
 if(USE_CUDA)
   message(STATUS "USE_CUDA is ON. Configuring CUDA support.")
+
+  # Determine CUDA architectures to build for.
+  # Priority: CMAKE_CUDA_ARCHITECTURES > CUDA_ARCH > default
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES OR CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+    if(DEFINED CUDA_ARCH AND NOT CUDA_ARCH STREQUAL "")
+      # Parse user-provided CUDA_ARCH (comma or semicolon separated)
+      string(REPLACE "," ";" _cuda_arch_list "${CUDA_ARCH}")
+      set(CMAKE_CUDA_ARCHITECTURES ${_cuda_arch_list})
+      message(STATUS "Using user-specified CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+    else()
+      # Use a default list of common architectures.
+      # 52 = Maxwell, 60/61 = Pascal, 70 = Volta, 75 = Turing, 80/86 = Ampere, 89 = Ada, 90 = Hopper
+      # Note: "native" requires CMake 3.24+ and a GPU present at configure time,
+      # so we use explicit architectures for better portability.
+      set(CMAKE_CUDA_ARCHITECTURES "52;60;61;70;75;80;86;89;90")
+      message(STATUS "Using default CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+    endif()
+  else()
+    message(STATUS "Using CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
+  endif()
+
   # 1. Enable the CUDA language. This finds the compiler automatically.
   enable_language(CUDA)
   find_package(CUDAToolkit REQUIRED)
@@ -100,44 +121,102 @@ if(USE_CUDA)
   # 3. Add the CUDA compile definition
   target_compile_definitions(decord PRIVATE DECORD_USE_CUDA)
 
-  # 4. Link against the modern CUDAToolkit imported targets
-  # This is much more reliable than using old custom variables.
-  if (TARGET CUDAToolkit::cudart)
-    target_link_libraries(decord PRIVATE
-            CUDAToolkit::cudart
-            CUDAToolkit::nvrtc
-            CUDAToolkit::cublas
-            CUDAToolkit::nvml
-    )
-    find_library(CUDA_NVCUVID_LIBRARY nvcuvid
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/Win32)
-    find_library(CUDA_CUDNN_LIBRARY cudnn
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/Win32)
+  # 4. Explicitly set CUDA_ARCHITECTURES on the target.
+  # This is required because the target was created before enable_language(CUDA),
+  # so CMAKE_CUDA_ARCHITECTURES is not automatically applied.
+  set_property(TARGET decord PROPERTY CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES})
+
+  # 5. Link against CUDA libraries
+  # Add CUDA include directories
+  target_include_directories(decord PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+
+  # Try modern CUDAToolkit imported targets first, fallback to manual library search
+  if(TARGET CUDA::cudart)
+    message(STATUS "Using CUDA:: imported targets")
+    target_link_libraries(decord PRIVATE CUDA::cudart)
+    if(TARGET CUDA::nvrtc)
+      target_link_libraries(decord PRIVATE CUDA::nvrtc)
+    endif()
+    if(TARGET CUDA::cublas)
+      target_link_libraries(decord PRIVATE CUDA::cublas)
+    endif()
+    if(TARGET CUDA::nvml)
+      target_link_libraries(decord PRIVATE CUDA::nvml)
+    endif()
+  elseif(TARGET CUDAToolkit::cudart)
+    message(STATUS "Using CUDAToolkit:: imported targets")
+    target_link_libraries(decord PRIVATE CUDAToolkit::cudart)
+    if(TARGET CUDAToolkit::nvrtc)
+      target_link_libraries(decord PRIVATE CUDAToolkit::nvrtc)
+    endif()
+    if(TARGET CUDAToolkit::cublas)
+      target_link_libraries(decord PRIVATE CUDAToolkit::cublas)
+    endif()
+    if(TARGET CUDAToolkit::nvml)
+      target_link_libraries(decord PRIVATE CUDAToolkit::nvml)
+    endif()
   else()
-    # fallback to the classic FindCUDA
-    find_package(CUDA REQUIRED)
-    find_library(CUDA_NVCUVID_LIBRARY nvcuvid
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/Win32)
-    find_library(CUDA_NVCUVID_LIBRARY nvcuvid
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/Win32)
-    find_library(CUDA_CUDNN_LIBRARY cudnn
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/x64
-            ${CUDA_TOOLKIT_ROOT_DIR}/lib/Win32)
-    target_link_libraries(decord PRIVATE
-            CUDA::cudart
-            CUDA::nvrtc
-            CUDA::cublas
-            CUDA::nvml
+    # Fallback: manually find and link CUDA libraries
+    message(STATUS "Falling back to manual CUDA library search")
+
+    # Define search paths
+    set(_cuda_lib_search_paths
+        ${CUDAToolkit_LIBRARY_DIR}
+        ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib64
+        ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib
+        /usr/local/cuda/lib64
+        /usr/local/cuda/lib
+        /usr/lib/x86_64-linux-gnu
+        /usr/lib64
     )
+
+    find_library(CUDA_CUDART_LIB cudart HINTS ${_cuda_lib_search_paths})
+    find_library(CUDA_NVRTC_LIB nvrtc HINTS ${_cuda_lib_search_paths})
+    find_library(CUDA_CUBLAS_LIB cublas HINTS ${_cuda_lib_search_paths})
+    find_library(CUDA_NVML_LIB nvidia-ml HINTS ${_cuda_lib_search_paths})
+
+    if(CUDA_CUDART_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_CUDART_LIB})
+      message(STATUS "Found cudart: ${CUDA_CUDART_LIB}")
+    else()
+      message(FATAL_ERROR "Could not find cudart library")
+    endif()
+
+    if(CUDA_NVRTC_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_NVRTC_LIB})
+      message(STATUS "Found nvrtc: ${CUDA_NVRTC_LIB}")
+    endif()
+
+    if(CUDA_CUBLAS_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_CUBLAS_LIB})
+      message(STATUS "Found cublas: ${CUDA_CUBLAS_LIB}")
+    endif()
+
+    if(CUDA_NVML_LIB)
+      target_link_libraries(decord PRIVATE ${CUDA_NVML_LIB})
+      message(STATUS "Found nvml: ${CUDA_NVML_LIB}")
+    endif()
   endif()
 
+  # Find nvcuvid library (required for hardware video decoding)
+  find_library(CUDA_NVCUVID_LIBRARY nvcuvid
+          HINTS
+          ${CUDAToolkit_LIBRARY_DIR}
+          ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib64
+          ${CMAKE_CUDA_COMPILER_LIBRARY_ROOT}/lib
+          /usr/local/cuda/lib64
+          /usr/local/cuda/lib
+          /usr/lib/x86_64-linux-gnu
+          /usr/lib64
+  )
+  if(CUDA_NVCUVID_LIBRARY)
+    target_link_libraries(decord PRIVATE ${CUDA_NVCUVID_LIBRARY})
+    message(STATUS "Found nvcuvid: ${CUDA_NVCUVID_LIBRARY}")
+  else()
+    message(WARNING "nvcuvid library not found. Hardware video decoding may not work.")
+  endif()
 
-
-  # 5. Set the CUDA standard
+  # 6. Set the CUDA standard
   set_property(TARGET decord PROPERTY CUDA_STANDARD 11)
 endif()
 

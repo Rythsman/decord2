@@ -1,11 +1,44 @@
 """PyTorch Profiler Wrapper for easy timeline profiling."""
 import os
+import gzip
 import functools
 from contextlib import contextmanager
 from typing import Optional, Callable, Any
 
 import torch
 from torch.profiler import profile, ProfilerActivity, schedule, tensorboard_trace_handler
+
+
+def export_chrome_trace_gzip(prof, path: str):
+    """Export Chrome trace as gzip compressed JSON.
+
+    Chrome's chrome://tracing can directly load .json.gz files.
+
+    Args:
+        prof: PyTorch profiler object
+        path: Output path (should end with .json.gz)
+    """
+    # Get the trace as string
+    if not path.endswith('.gz'):
+        path = path + '.gz'
+
+    # Export to a temporary string first, then compress
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=True) as tmp:
+        tmp_path = tmp.name
+
+    # Export to temp file
+    prof.export_chrome_trace(tmp_path)
+
+    # Read and compress
+    with open(tmp_path, 'rb') as f_in:
+        with gzip.open(path, 'wb', compresslevel=6) as f_out:
+            f_out.writelines(f_in)
+
+    # Clean up temp file
+    os.remove(tmp_path)
+
+    return path
 
 
 def profile_function(
@@ -24,6 +57,7 @@ def profile_function(
     repeat: int = 1,
     export_chrome_trace: bool = True,
     export_stacks: bool = False,
+    use_gzip: bool = True,
 ):
     """
     Decorator to profile a function and export timeline.
@@ -52,6 +86,7 @@ def profile_function(
         repeat: Number of profiling cycles
         export_chrome_trace: Export Chrome trace JSON
         export_stacks: Export flame graph stacks
+        use_gzip: Compress trace file with gzip (default: True)
     """
     if activities is None:
         activities = [ProfilerActivity.CPU]
@@ -85,8 +120,12 @@ def profile_function(
 
             # Export Chrome trace
             if export_chrome_trace:
-                trace_path = os.path.join(output_dir, f"{name}_trace.json")
-                prof.export_chrome_trace(trace_path)
+                if use_gzip:
+                    trace_path = os.path.join(output_dir, f"{name}_trace.json.gz")
+                    export_chrome_trace_gzip(prof, trace_path)
+                else:
+                    trace_path = os.path.join(output_dir, f"{name}_trace.json")
+                    prof.export_chrome_trace(trace_path)
                 print(f"Chrome trace saved to: {trace_path}")
 
             # Export stacks for flame graph
@@ -120,6 +159,7 @@ def profile_context(
     with_stack: bool = True,
     profile_memory: bool = True,
     export_chrome_trace: bool = True,
+    use_gzip: bool = True,
 ):
     """
     Context manager for profiling a code block.
@@ -137,6 +177,7 @@ def profile_context(
         with_stack: Record Python call stack
         profile_memory: Profile memory usage
         export_chrome_trace: Export Chrome trace JSON
+        use_gzip: Compress trace file with gzip (default: True)
     """
     if activities is None:
         activities = [ProfilerActivity.CPU]
@@ -155,8 +196,12 @@ def profile_context(
 
     # Export Chrome trace
     if export_chrome_trace:
-        trace_path = os.path.join(output_dir, f"{name}_trace.json")
-        prof.export_chrome_trace(trace_path)
+        if use_gzip:
+            trace_path = os.path.join(output_dir, f"{name}_trace.json.gz")
+            export_chrome_trace_gzip(prof, trace_path)
+        else:
+            trace_path = os.path.join(output_dir, f"{name}_trace.json")
+            prof.export_chrome_trace(trace_path)
         print(f"Chrome trace saved to: {trace_path}")
 
     # Print summary

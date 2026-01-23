@@ -15,7 +15,24 @@ Args:
 """
 
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
+
+
+@contextmanager
+def timer(name=""):
+    """Context manager for timing code blocks.
+
+    Usage:
+        with timer("my operation"):
+            do_something()
+    """
+    start = time.perf_counter()
+    yield
+    elapsed = time.perf_counter() - start
+    label = f"[{name}] " if name else ""
+    print(f"{label}Elapsed: {elapsed:.3f}s")
 
 # Common video file extensions
 VIDEO_EXTENSIONS = {

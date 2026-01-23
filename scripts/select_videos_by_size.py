@@ -50,6 +50,28 @@ def get_video_files(folder_path):
     return video_files
 
 
+def compute_indices(total, count):
+    """Compute evenly distributed indices.
+
+    Args:
+        total: Total number of items.
+        count: Number of items to select.
+
+    Returns:
+        List of indices to select.
+    """
+    if count <= 0 or total <= 0:
+        return []
+    if count >= total:
+        return list(range(total))
+    if count == 1:
+        return [total // 2]
+
+    # Evenly spaced indices including first and last
+    step = (total - 1) / (count - 1)
+    return [int(round(i * step)) for i in range(count)]
+
+
 def select_from_range(video_files, start_percent, end_percent, count):
     """Select videos evenly distributed from a specific percentage range.
 
@@ -74,29 +96,11 @@ def select_from_range(video_files, start_percent, end_percent, count):
     end_idx = max(start_idx + 1, min(end_idx, total))
 
     range_files = video_files[start_idx:end_idx]
-
     range_count = len(range_files)
-    if range_count == 0:
-        return []
 
-    actual_count = min(count, range_count)
-
-    if actual_count == range_count:
-        return [f[0] for f in range_files]
-
-    # Evenly distribute selection, ensuring first and last are included
-    if actual_count == 1:
-        # Single selection: pick the middle one
-        idx = range_count // 2
-        return [range_files[idx][0]]
-
-    # Use linspace-like distribution to include both endpoints
-    selected = []
-    for i in range(actual_count):
-        idx = int(i * (range_count - 1) / (actual_count - 1))
-        selected.append(range_files[idx][0])
-
-    return selected
+    # Compute indices and select
+    indices = compute_indices(range_count, count)
+    return [range_files[i][0] for i in indices]
 
 
 def main():

@@ -50,20 +50,17 @@ def get_video_files(folder_path):
     return video_files
 
 
-def select_from_range(video_files, start_percent, end_percent, count,
-                      prefer_largest=False):
-    """Select videos from a specific percentage range.
+def select_from_range(video_files, start_percent, end_percent, count):
+    """Select videos evenly distributed from a specific percentage range.
 
     Args:
         video_files: List of (path, size) tuples, sorted by size ascending.
         start_percent: Start of the range (0-100).
         end_percent: End of the range (0-100).
         count: Number of videos to select.
-        prefer_largest: If True, select largest files from range first.
-                        If False, select smallest files from range first.
 
     Returns:
-        List of file paths selected from the range.
+        List of file paths selected from the range (evenly distributed).
     """
     total = len(video_files)
     if total == 0:
@@ -87,15 +84,19 @@ def select_from_range(video_files, start_percent, end_percent, count,
     if actual_count == range_count:
         return [f[0] for f in range_files]
 
-    # Select from the appropriate end of the range
-    if prefer_largest:
-        # Select from the end (largest files in this range)
-        selected_files = range_files[-actual_count:]
-    else:
-        # Select from the beginning (smallest files in this range)
-        selected_files = range_files[:actual_count]
+    # Evenly distribute selection, ensuring first and last are included
+    if actual_count == 1:
+        # Single selection: pick the middle one
+        idx = range_count // 2
+        return [range_files[idx][0]]
 
-    return [f[0] for f in selected_files]
+    # Use linspace-like distribution to include both endpoints
+    selected = []
+    for i in range(actual_count):
+        idx = int(i * (range_count - 1) / (actual_count - 1))
+        selected.append(range_files[idx][0])
+
+    return selected
 
 
 def main():
@@ -124,13 +125,13 @@ def main():
         print(f"Warning: Only {total_videos} videos found, need at least 15 for ideal selection.")
         print("Will select as many as possible from each range.")
 
-    # Select from each range
-    # Bottom 20%: 0-20% -> select smallest files
-    # Middle 20%: 40-60% -> select from middle of range
-    # Top 20%: 80-100% -> select largest files
-    bottom_20 = select_from_range(video_files, 0, 20, 5, prefer_largest=False)
-    middle_20 = select_from_range(video_files, 40, 60, 5, prefer_largest=False)
-    top_20 = select_from_range(video_files, 80, 100, 5, prefer_largest=True)
+    # Select from each range (evenly distributed within each range)
+    # Bottom 20%: 0-20%
+    # Middle 20%: 40-60%
+    # Top 20%: 80-100%
+    bottom_20 = select_from_range(video_files, 0, 20, 5)
+    middle_20 = select_from_range(video_files, 40, 60, 5)
+    top_20 = select_from_range(video_files, 80, 100, 5)
 
     print(f"Selected from bottom 20%: {len(bottom_20)} videos")
     print(f"Selected from middle 20%: {len(middle_20)} videos")
